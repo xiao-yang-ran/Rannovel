@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.idea/
+.vscode/
+data/*.db
+data/*.db-*
+backups/*.zip
+RanNovel_*_final.zip
