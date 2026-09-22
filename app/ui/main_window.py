@@ -4,12 +4,12 @@ from __future__ import annotations
 import math
 import re
 from pathlib import Path
-from PySide6.QtCore import QMimeData, QPointF, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QMimeData, QPointF, QRectF, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QImage, QPainter, QPen, QPixmap, QTextCursor, QTextImageFormat
 from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFontComboBox, QFormLayout, QFrame, QGraphicsScene, QGraphicsView, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSpinBox,
-    QSplitter, QStackedWidget, QTextEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+    QSplitter, QStackedWidget, QTabWidget, QTextEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 from app.models import Inspiration
 from app.services.backup_service import create_backup, restore_backup
 from app.services.repository import KINDS, TARGET_PERMISSIONS
@@ -105,7 +105,7 @@ class GalleryDialog(QDialog):
     def __init__(self, repo, kind, source_id, parent=None):
         super().__init__(parent)
         self.repo, self.kind, self.source_id = repo, kind, source_id
-        self.setWindowTitle("图库 · 可拖入本地图片")
+        self.setWindowTitle("条目配图 · 可拖入本地图片")
         self.resize(550, 430)
         layout = QVBoxLayout(self)
         self.list = GalleryList(); layout.addWidget(self.list)
@@ -145,6 +145,36 @@ class GalleryDialog(QDialog):
             layout = QVBoxLayout(dialog); label = QLabel(); label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setPixmap(QPixmap(str(path)).scaled(760, 540, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             layout.addWidget(label); button("关闭", dialog.accept, layout); dialog.exec(); return
+
+
+def image_controls(form, repo, kind, item_id, parent):
+    """Choose optional images before saving; manage existing images on this item."""
+    pending = []
+    container = QWidget(); row = QHBoxLayout(container); row.setContentsMargins(0, 0, 0, 0)
+    status = QLabel(); row.addWidget(status)
+    def update_status():
+        existing = len(repo.gallery(kind, item_id)) if item_id is not None else 0
+        status.setText(f"已有 {existing} 张 · 待添加 {len(pending)} 张" if pending else
+                       f"已有 {existing} 张" if existing else "无图片")
+    def select_files():
+        paths, _ = QFileDialog.getOpenFileNames(parent, "为此条目选择图片", str(Path.home()),
+                                                "图片 (*.png *.jpg *.jpeg *.bmp *.gif *.webp)")
+        pending.extend(paths)
+        update_status()
+    update_status()
+    button("选择图片…", select_files, row)
+    if item_id is not None:
+        def manage_images():
+            GalleryDialog(repo, kind, item_id, parent).exec(); update_status()
+        button("查看／移除已有图片…", manage_images, row)
+    form.addRow("配图（可选）", container)
+    return pending
+
+
+def attach_images(repo, kind, item_id, paths):
+    for path in paths:
+        asset_id, _ = repo.import_image(path)
+        repo.add_gallery_image(kind, item_id, asset_id)
 
 
 class ReferencePanel(QWidget):
@@ -416,7 +446,6 @@ class EntityPage(QWidget):
         button("新增", self.add, row); button("编辑", self.edit, row)
         actions = [("查看引用位置", self.usages)]
         if kind == "event": actions.append(("管理事件人物", self.manage_event_people))
-        if kind in ("character", "location"): actions.append(("打开图库", self.gallery))
         actions.extend([(None, None), ("删除所选…", self.delete)])
         menu_button("更多操作", actions, row)
         self.list = QListWidget(); layout.addWidget(self.list)
@@ -479,8 +508,9 @@ class EntityPage(QWidget):
             editor = QTextEdit(str(getattr(old, field, "")) if old else ""); editor.setMaximumHeight(75)
             form.addRow(label, editor); extra_widgets[field] = editor
         if self.kind in ("character", "setting"):
-            custom = QTextEdit("\n".join(f"{k}={v}" for k, v in (old.custom_fields or {}).items()) if old else "")
-            custom.setMaximumHeight(90); form.addRow("自定义字段（每行 键=值）", custom); extra_widgets["custom_fields"] = custom
+            custom = QTextEdit("\n".join(f"{k}：{v}" for k, v in (old.custom_fields or {}).items()) if old else "")
+            custom.setPlaceholderText("每行写一项，例如：喜好：喝茶")
+            custom.setMaximumHeight(90); form.addRow("补充信息", custom); extra_widgets["custom_fields"] = custom
         if self.kind == "character":
             faction = QComboBox(); faction.addItem("未归属", None)
             for item in self.repo.list_factions(): faction.addItem(f"{item.name} · {item.kind}", item.id)
@@ -490,6 +520,7 @@ class EntityPage(QWidget):
         if self.kind == "event":
             year = QSpinBox(); year.setRange(-9999, 9999); year.setValue(old.year if old else 1); form.addRow("年份", year)
             month = QSpinBox(); month.setRange(1, 12); month.setValue(old.month if old else 1); form.addRow("月份", month)
+        pending_images = image_controls(form, self.repo, self.kind, item_id, dialog) if self.kind in ("character", "location") else []
         box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         box.accepted.connect(dialog.accept); box.rejected.connect(dialog.reject); outer.addWidget(box)
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -501,14 +532,19 @@ class EntityPage(QWidget):
                 if "custom_fields" in values:
                     custom_fields = {}
                     for line in values["custom_fields"].splitlines():
-                        if "=" in line:
-                            key, value = line.split("=", 1)
+                        separator = min((mark for mark in ("：", "=", ":") if mark in line),
+                                        key=line.index, default=None)
+                        if separator:
+                            key, value = line.split(separator, 1)
                             if key.strip(): custom_fields[key.strip()] = value.strip()
                     values["custom_fields"] = custom_fields
                 if year: values.update(year=year.value(), month=month.value())
                 new_id = self.repo.save_entity(self.kind, item_id, self.work_id, **values)
                 self.refresh()
                 if self.kind == "event": self.edit_event_people(new_id)
+                if pending_images:
+                    try: attach_images(self.repo, self.kind, new_id, pending_images)
+                    except Exception as image_error: show_error(self, f"条目已保存，但部分图片未能添加：{image_error}")
             except Exception as error: show_error(self, error)
     def edit_event_people(self, event_id):
         people = self.repo.list_entities("character", limit=500)
@@ -540,8 +576,6 @@ class EntityPage(QWidget):
             suffix = "\n关联人物：" + "、".join(p.name for p in people)
         else: suffix = ""
         QMessageBox.information(self, "引用位置", "\n".join(f"{kind} #{i}" for kind, i in uses) + suffix if uses or suffix else "尚无引用。")
-    def gallery(self):
-        if self.selected_id(): GalleryDialog(self.repo, self.kind, self.selected_id(), self).exec()
     def delete(self):
         item_id = self.selected_id()
         if item_id and QMessageBox.question(self, "删除资料", "永久删除所选资料？已有引用或图库图片时会拒绝删除。") == QMessageBox.StandardButton.Yes:
@@ -607,10 +641,61 @@ class EntityPage(QWidget):
             except Exception as error: show_error(self, error)
 
 
+def edit_inspiration(parent, repo, item_id=None):
+    with repo.database.session_factory() as session:
+        old = session.get(Inspiration, item_id) if item_id is not None else None
+        content_value, tags_value = (old.content, old.tags) if old else ("", "")
+    dialog = QDialog(parent); dialog.setWindowTitle("编辑灵感" if old else "新建灵感"); dialog.resize(620, 380)
+    form = QFormLayout(dialog)
+    content = QTextEdit(content_value); form.addRow("内容", content)
+    tags = QLineEdit(tags_value); form.addRow("标签", tags)
+    pool = None
+    if old is None:
+        pool = QComboBox(); pool.addItem("随笔池", "essay"); pool.addItem("长篇池（片段也使用此池）", "novel")
+        form.addRow("来源池", pool)
+    pending_images = image_controls(form, repo, "inspiration", item_id, dialog)
+    box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+    box.accepted.connect(dialog.accept); box.rejected.connect(dialog.reject); form.addRow(box)
+    if dialog.exec() != QDialog.DialogCode.Accepted: return False
+    try:
+        if old is None: item_id = repo.add_inspiration(content.toPlainText(), tags.text(), pool.currentData())
+        else: repo.update_inspiration(item_id, content.toPlainText(), tags.text())
+    except Exception as error:
+        show_error(parent, error); return False
+    if pending_images:
+        try: attach_images(repo, "inspiration", item_id, pending_images)
+        except Exception as image_error: show_error(parent, f"灵感已保存，但部分图片未能添加：{image_error}")
+    return True
+
+
+def inspiration_marker():
+    pixmap = QPixmap(22, 22); pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap); painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor("#64879A"), 2)); painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(5, 5, 12, 12)); painter.end()
+    return QIcon(pixmap)
+
+
 class InspirationList(QListWidget):
     dropped_on_self = Signal(int, int)
+    use_requested = Signal(int)
     def __init__(self):
         super().__init__(); self.setDragEnabled(True); self.setAcceptDrops(True)
+        self.setObjectName("inspirationPool"); self.setIconSize(QSize(22, 22))
+        self.use_icon = inspiration_marker()
+    def mouseReleaseEvent(self, event):
+        item = self.itemAt(event.pos())
+        if (event.button() == Qt.MouseButton.LeftButton and item and
+                event.pos().x() <= self.visualItemRect(item).left() + 42):
+            self.setCurrentItem(item)
+            self.use_requested.emit(item.data(Qt.ItemDataRole.UserRole))
+            event.accept(); return
+        super().mouseReleaseEvent(event)
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return) and self.currentItem():
+            self.use_requested.emit(self.currentItem().data(Qt.ItemDataRole.UserRole))
+            event.accept(); return
+        super().keyPressEvent(event)
     def startDrag(self, _actions):
         item = self.currentItem()
         if not item: return
@@ -631,114 +716,85 @@ class InspirationList(QListWidget):
         else: event.ignore()
 
 
-class WorkDropList(QListWidget):
-    assigned = Signal(int, int)
-    def __init__(self):
-        super().__init__(); self.setAcceptDrops(True)
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasFormat("application/x-rannovel-inspiration"): event.acceptProposedAction()
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasFormat("application/x-rannovel-inspiration"): event.acceptProposedAction()
-    def dropEvent(self, event):
-        target = self.itemAt(event.position().toPoint())
-        if target:
-            item_id = int(bytes(event.mimeData().data("application/x-rannovel-inspiration")))
-            self.assigned.emit(item_id, target.data(Qt.ItemDataRole.UserRole)); event.acceptProposedAction()
-
-
 class InspirationPage(QWidget):
-    def __init__(self, repo):
-        super().__init__(); self.repo = repo
-        layout = QVBoxLayout(self); layout.addWidget(QLabel("全局灵感库 · 拖到右侧作品即可归属"))
+    def __init__(self, repo, current_work_id):
+        super().__init__(); self.repo, self.current_work_id = repo, current_work_id
+        layout = QVBoxLayout(self); layout.addWidget(QLabel("待用灵感 · 点击条目前的圆圈归属作品"))
         row = QHBoxLayout(); layout.addLayout(row)
         self.search = QLineEdit(); self.search.setPlaceholderText("搜索全部灵感的内容和标签"); row.addWidget(self.search)
         self.debounce = QTimer(self); self.debounce.setSingleShot(True); self.debounce.setInterval(300)
-        self.search.textChanged.connect(lambda: self.debounce.start()); self.debounce.timeout.connect(lambda: self.refresh(False))
+        self.search.textChanged.connect(lambda: self.debounce.start()); self.debounce.timeout.connect(self.refresh)
         button("新建灵感", self.add, row); button("编辑", self.edit, row)
-        button("归属作品…", self.assign_selected, row)
-        menu_button("更多操作", [("打开图库", self.gallery), ("查看引用位置", self.usages),
-                                (None, None), ("上移", lambda: self.move(-1)),
-                                ("下移", lambda: self.move(1)), (None, None),
-                                ("解除归属…", self.unassign), ("删除所选…", self.delete)], row)
-        split = QSplitter(); layout.addWidget(split, 1)
-        pools = QWidget(); pl = QVBoxLayout(pools); split.addWidget(pools)
+        menu_button("更多操作", [("标记为已使用…", self.assign_selected),
+                                ("上移", lambda: self.move(-1)), ("下移", lambda: self.move(1)),
+                                (None, None), ("删除所选…", self.delete)], row)
+        self.tabs = QTabWidget(); layout.addWidget(self.tabs, 1)
         self.lists = {}; self.more_buttons = {}; self.offsets = {}
         self._selected_id = None
-        for key, label in (("essay", "随笔池 · 待用"), ("novel", "长篇池 · 待用"), ("used", "已使用 · 两池合并")):
-            pl.addWidget(QLabel(label)); view = InspirationList(); pl.addWidget(view)
+        for key, label in (("essay", "随笔池"), ("novel", "长篇池（含片段）")):
+            panel = QWidget(); panel_layout = QVBoxLayout(panel)
+            view = InspirationList(); panel_layout.addWidget(view, 1)
             view.itemClicked.connect(lambda item: setattr(self, "_selected_id", item.data(Qt.ItemDataRole.UserRole)))
             view.currentItemChanged.connect(lambda item, previous: setattr(self, "_selected_id", item.data(Qt.ItemDataRole.UserRole)) if item else None)
-            if key != "used": view.dropped_on_self.connect(self.drag_reorder)
+            view.itemDoubleClicked.connect(lambda _: self.edit())
+            view.dropped_on_self.connect(self.drag_reorder)
+            view.use_requested.connect(self.use_item)
             self.lists[key] = view
-            self.more_buttons[key] = button("加载更多", lambda checked=False, k=key: self.load_more(k), pl)
-        target_panel = QWidget(); tl = QVBoxLayout(target_panel); split.addWidget(target_panel)
-        tl.addWidget(QLabel("拖拽目标 · 放到作品上")); self.targets = WorkDropList(); tl.addWidget(self.targets)
-        self.targets.assigned.connect(self.assign)
-        split.setStretchFactor(0, 3); split.setStretchFactor(1, 1)
+            self.more_buttons[key] = button("加载更多", lambda checked=False, k=key: self.load_more(k), panel_layout)
+            self.tabs.addTab(panel, label)
+        self.tabs.currentChanged.connect(self.clear_selection)
         self.refresh()
-    def refresh(self, include_targets=True):
+    def clear_selection(self, _index):
+        self._selected_id = None
+        for view in self.lists.values(): view.clearSelection()
+    def refresh(self):
         self._selected_id = None
         for key, view in self.lists.items():
             view.clear()
             self.offsets[key] = 0
             self.load_more(key)
-        if include_targets: self.refresh_targets()
-    def refresh_targets(self):
-        self.targets.clear()
-        for work in self.repo.list_works():
-            row = QListWidgetItem(f"{KINDS[work.kind]} · {work.title}")
-            row.setData(Qt.ItemDataRole.UserRole, work.id); self.targets.addItem(row)
     def load_more(self, key):
         view = self.lists[key]
-        items = self.repo.list_inspirations(self.search.text(), None if key == "used" else key,
-                                            key == "used", limit=200, offset=self.offsets[key])
+        items = self.repo.list_inspirations(self.search.text(), key, False, limit=200, offset=self.offsets[key])
         for item in items:
-            owner = item.owner
-            label = f"[{'随笔池' if item.pool == 'essay' else '长篇池'}] {item.content[:100]}  #{item.tags}"
-            if owner: label += f"  → {owner.title}"
-            row = QListWidgetItem(label); row.setData(Qt.ItemDataRole.UserRole, item.id); view.addItem(row)
+            label = " ".join(item.content.split())[:140]
+            if item.tags: label += f"  ·  #{item.tags}"
+            row = QListWidgetItem(view.use_icon, label)
+            row.setData(Qt.ItemDataRole.UserRole, item.id)
+            row.setToolTip("点击左侧圆圈标记为已使用；双击编辑。\n" + item.content)
+            row.setSizeHint(QSize(0, 48)); view.addItem(row)
         self.offsets[key] += len(items)
         self.more_buttons[key].setVisible(len(items) == 200)
     def selected_id(self):
         return self._selected_id
-    def get_item(self, item_id):
-        with self.repo.database.session_factory() as s: return s.get(Inspiration, item_id)
     def add(self):
-        dialog = QDialog(self); dialog.setWindowTitle("新建灵感"); form = QFormLayout(dialog)
-        content = QTextEdit(); form.addRow("内容", content)
-        tags = QLineEdit(); form.addRow("标签", tags)
-        pool = QComboBox(); pool.addItem("随笔池", "essay"); pool.addItem("长篇池（片段也使用此池）", "novel"); form.addRow("来源池", pool)
-        box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        box.accepted.connect(dialog.accept); box.rejected.connect(dialog.reject); form.addRow(box)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            try: self.repo.add_inspiration(content.toPlainText(), tags.text(), pool.currentData()); self.refresh()
-            except Exception as error: show_error(self, error)
+        if edit_inspiration(self, self.repo): self.refresh()
     def edit(self):
         item_id = self.selected_id()
-        if not item_id: return
-        item = self.get_item(item_id)
-        content, ok = QInputDialog.getMultiLineText(self, "编辑灵感", "内容", item.content)
-        if not ok: return
-        tags, ok = QInputDialog.getText(self, "编辑标签", "标签", text=item.tags)
-        if ok:
-            try: self.repo.update_inspiration(item_id, content, tags); self.refresh()
-            except Exception as error: show_error(self, error)
-    def gallery(self):
-        if self.selected_id(): GalleryDialog(self.repo, "inspiration", self.selected_id(), self).exec()
+        if item_id and edit_inspiration(self, self.repo, item_id): self.refresh()
     def assign_selected(self):
-        item_id = self.selected_id()
-        if not item_id: return
-        works = self.repo.list_works(); labels = [f"{KINDS[w.kind]} · {w.title}" for w in works]
-        if not labels: QMessageBox.information(self, "没有作品", "请先新建作品。"); return
-        label, ok = QInputDialog.getItem(self, "归属灵感", "作品", labels, 0, False)
-        if ok: self.assign(item_id, works[labels.index(label)].id)
+        if self.selected_id(): self.use_item(self.selected_id())
+    def use_item(self, item_id):
+        with self.repo.database.session_factory() as session:
+            item = session.get(Inspiration, item_id)
+            if item is None: return
+            pool = item.pool
+        works = [work for work in self.repo.list_works()
+                 if (work.kind == "essay") == (pool == "essay")]
+        if not works:
+            QMessageBox.information(self, "没有匹配作品", "请先创建与此灵感池对应的作品。"); return
+        current = next((work for work in works if work.id == self.current_work_id()), None)
+        if current: work_id = current.id
+        elif len(works) == 1: work_id = works[0].id
+        else:
+            labels = [f"{KINDS[work.kind]} · {work.title}" for work in works]
+            label, ok = QInputDialog.getItem(self, "标记为已使用", "选择归属作品", labels, 0, False)
+            if not ok: return
+            work_id = works[labels.index(label)].id
+        self.assign(item_id, work_id)
     def assign(self, item_id, work_id):
-        try: self.repo.assign_inspiration(item_id, work_id); self.refresh(); QMessageBox.information(self, "归属完成", "灵感已移入已使用。")
+        try: self.repo.assign_inspiration(item_id, work_id); self.refresh()
         except Exception as error: show_error(self, error)
-    def usages(self):
-        if self.selected_id():
-            uses = self.repo.usages("inspiration", self.selected_id())
-            QMessageBox.information(self, "引用位置", "\n".join(f"{kind} #{i}" for kind, i in uses) if uses else "已归属作品，尚未关联具体正文。")
     def move(self, direction):
         if self.selected_id():
             try: self.repo.reorder_inspiration(self.selected_id(), direction); self.refresh()
@@ -746,12 +802,52 @@ class InspirationPage(QWidget):
     def drag_reorder(self, source_id, target_id):
         try: self.repo.move_inspiration_before(source_id, target_id); self.refresh()
         except Exception as error: show_error(self, error)
-    def unassign(self):
-        if self.selected_id() and QMessageBox.question(self, "解除归属", "解除作品和正文关联，并放回待用池？") == QMessageBox.StandardButton.Yes:
-            self.repo.unassign_inspiration(self.selected_id()); self.refresh()
     def delete(self):
         if self.selected_id() and QMessageBox.question(self, "删除灵感", "永久删除所选灵感？") == QMessageBox.StandardButton.Yes:
             try: self.repo.delete_inspiration(self.selected_id()); self.refresh()
+            except Exception as error: show_error(self, error)
+
+
+class UsedInspirationDialog(QDialog):
+    def __init__(self, repo, parent=None):
+        super().__init__(parent); self.repo = repo
+        self.setWindowTitle("已使用灵感"); self.resize(760, 580)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("已归属作品的灵感 · 可编辑或放回待用池"))
+        self.search = QLineEdit(); self.search.setPlaceholderText("搜索内容和标签"); layout.addWidget(self.search)
+        self.debounce = QTimer(self); self.debounce.setSingleShot(True); self.debounce.setInterval(300)
+        self.search.textChanged.connect(lambda: self.debounce.start()); self.debounce.timeout.connect(self.refresh)
+        self.list = QListWidget(); self.list.setObjectName("usedInspirationList"); layout.addWidget(self.list, 1)
+        self.list.itemDoubleClicked.connect(lambda _: self.edit())
+        self.more = button("加载更多", self.load_more, layout)
+        row = QHBoxLayout(); layout.addLayout(row)
+        button("编辑及配图", self.edit, row); button("查看引用", self.usages, row)
+        button("放回待用池…", self.unassign, row); button("关闭", self.accept, row)
+        self.refresh()
+    def refresh(self):
+        self.offset = 0; self.list.clear(); self.load_more()
+    def load_more(self):
+        items = self.repo.list_inspirations(self.search.text(), used=True, limit=200, offset=self.offset)
+        for item in items:
+            label = " ".join(item.content.split())[:130]
+            if item.tags: label += f"  ·  #{item.tags}"
+            label += f"  →  {item.owner.title}" if item.owner else ""
+            row = QListWidgetItem(label); row.setData(Qt.ItemDataRole.UserRole, item.id)
+            row.setToolTip(item.content); row.setSizeHint(QSize(0, 48)); self.list.addItem(row)
+        self.offset += len(items); self.more.setVisible(len(items) == 200)
+    def selected_id(self):
+        item = self.list.currentItem()
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
+    def edit(self):
+        if self.selected_id() and edit_inspiration(self, self.repo, self.selected_id()): self.refresh()
+    def usages(self):
+        if self.selected_id():
+            uses = self.repo.usages("inspiration", self.selected_id())
+            QMessageBox.information(self, "引用位置", "\n".join(f"{kind} #{item_id}" for kind, item_id in uses)
+                                    if uses else "已归属作品，尚未关联具体正文。")
+    def unassign(self):
+        if self.selected_id() and QMessageBox.question(self, "放回待用池", "解除作品和正文关联，并放回待用池？") == QMessageBox.StandardButton.Yes:
+            try: self.repo.unassign_inspiration(self.selected_id()); self.refresh()
             except Exception as error: show_error(self, error)
 
 
@@ -835,6 +931,8 @@ class MainWindow(QMainWindow):
         root.addWidget(content, 1)
         self.navigation.currentRowChanged.connect(self.change_page)
         file_menu = self.menuBar().addMenu("文件")
+        file_menu.addAction("已使用灵感…", self.show_used_inspirations)
+        file_menu.addSeparator()
         file_menu.addAction("立即备份…", self.backup)
         file_menu.addAction("从 ZIP 恢复…", self.restore)
         file_menu.addSeparator(); file_menu.addAction("退出", self.close)
@@ -865,6 +963,10 @@ class MainWindow(QMainWindow):
                 if not self.switch_work(work_id): self.rebuild_work_menu()
             except Exception as error: show_error(self, error)
     def open_work(self): self.choose_work(False)
+    def show_used_inspirations(self):
+        UsedInspirationDialog(self.repo, self).exec()
+        page = self.page_cache.get(("inspiration", None))
+        if page: page.refresh()
     def open_archived(self): self.choose_work(True)
     def choose_work(self, archived):
         works = self.repo.list_works(archived); labels = [f"{KINDS[w.kind]} · {w.title}" for w in works]
@@ -922,7 +1024,7 @@ class MainWindow(QMainWindow):
             created = key not in self.page_cache
             if created:
                 page = (WritingPage(self.repo, work.id) if kind == "write" else
-                        InspirationPage(self.repo) if kind == "inspiration" else
+                        InspirationPage(self.repo, lambda: self.current_work_id) if kind == "inspiration" else
                         RelationGraph(self.repo) if kind == "graph" else
                         EntityPage(self.repo, kind, work.id if kind != "character" else None))
                 self.page_cache[key] = page; self.pages.addWidget(page)

@@ -71,6 +71,25 @@ QListWidget#navigation::item:selected {
     color: #FFF8E8;
     border-left: 3px solid #D6A174;
 }
+QListWidget#inspirationPool, QListWidget#usedInspirationList {
+    background: #FFFCF6;
+    border: 1px solid #E4DACA;
+    border-radius: 11px;
+    outline: none;
+    font-family: "Microsoft YaHei UI";
+    font-size: 15px;
+}
+QListWidget#inspirationPool::item, QListWidget#usedInspirationList::item {
+    padding: 8px 10px;
+    border-bottom: 1px solid #F0E9DF;
+}
+QListWidget#inspirationPool::item:hover, QListWidget#usedInspirationList::item:hover {
+    background: #F3ECE1;
+}
+QListWidget#inspirationPool::item:selected, QListWidget#usedInspirationList::item:selected {
+    background: #E5D9C8;
+    color: #332F2A;
+}
 QWidget#heroPanel {
     background: transparent;
     border-radius: 18px;
