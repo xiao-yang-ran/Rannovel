@@ -47,7 +47,7 @@ class ImageTextEdit(QTextEdit):
         elif source.hasImage():
             image = QImage(source.imageData())
             if not image.isNull():
-                with tempfile.TemporaryDirectory() as temporary:
+                with tempfile.TemporaryDirectory(prefix="clipboard_", dir=self.repo.paths.data_dir) as temporary:
                     path = Path(temporary) / "clipboard.png"
                     if image.save(str(path), "PNG"):
                         self.insert_image(path)

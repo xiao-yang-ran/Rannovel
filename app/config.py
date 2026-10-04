@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,8 +16,7 @@ class AppPaths:
     @classmethod
     def default(cls) -> "AppPaths":
         root = Path(__file__).resolve().parents[1]
-        appdata = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
-        data = appdata / "RanNovel"
+        data = root / "userdata"
         return cls(root, data, data / "rannovel.db", data / "backups", data / "assets")
 
     def ensure_directories(self) -> None:

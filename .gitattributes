@@ -1,0 +1,12 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.cmd text eol=crlf
+*.exe binary
+*.dll binary
+*.pyd binary
+*.zip binary
+*.qm binary
+*.ico binary
+*.rtf binary

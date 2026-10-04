@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
         works = repo.list_works()
         if works: self.current_work_id = works[0].id
         self.navigation.setCurrentRow(0)
-        self.statusBar().showMessage("完全离线 · 数据保存在 AppData")
+        self.statusBar().showMessage("完全离线 · 数据保存在程序文件夹内的 userdata")
     def rebuild_work_menu(self):
         self.work_menu.clear()
         self.work_menu.addAction("新建作品…", self.new_work)

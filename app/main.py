@@ -18,7 +18,7 @@ def main() -> int:
     install_chinese_qt_translations(app)
     app.setStyle("Fusion"); app.setStyleSheet(APP_STYLE)
     paths = AppPaths.default()
-    icon = paths.project_root / "图标.ico"
+    icon = paths.project_root / "resources" / "RanNovel.ico"
     if icon.is_file(): app.setWindowIcon(QIcon(str(icon)))
     database = None
     lock = None

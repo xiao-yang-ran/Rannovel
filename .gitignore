@@ -1,14 +1,23 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.idea/
-.vscode/
+# Personal writing, images, backups and logs are never published.
+/userdata/
+/data/
+/assets/
+/backups/
 *.db
 *.db-*
 *.sqlite
 *.sqlite3
-data/
-assets/
-backups/
-*.zip.tmp
-RanNovel_*_final.zip
+*.log
+
+# Generated files and local editor settings.
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.idea/
+.vscode/
+*.tmp
+/.packaging/
+
+# Keep runtime/python312.zip: it is the bundled standard library.
+/RanNovel_*_final.zip
