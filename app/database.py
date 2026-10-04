@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 import uuid
 from contextlib import closing
-from sqlalchemy import create_engine, event
+from sqlalchemy import URL, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from app.models import Base, Faction
 
@@ -46,7 +46,7 @@ class Database:
     def __init__(self, database_file: Path):
         self.database_file = Path(database_file).resolve()
         self.database_file.parent.mkdir(parents=True, exist_ok=True)
-        self.engine = create_engine(f"sqlite:///{self.database_file.as_posix()}", connect_args={"check_same_thread": False})
+        self.engine = create_engine(URL.create("sqlite", database=str(self.database_file)), connect_args={"check_same_thread": False})
         @event.listens_for(self.engine, "connect")
         def configure(connection, _record):
             connection.execute("PRAGMA foreign_keys=ON")
@@ -61,6 +61,7 @@ class Database:
             with closing(sqlite3.connect(self.database_file)) as source, closing(sqlite3.connect(safety)) as target:
                 source.backup(target)
         with self.engine.begin() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
             version = connection.exec_driver_sql("PRAGMA user_version").scalar()
             if version > SCHEMA_VERSION:
                 raise RuntimeError("资料库由更新版本的 RanNovel 创建，请升级应用。")
@@ -73,8 +74,20 @@ class Database:
             elif version == 1:
                 migrate_1_to_2(connection)
                 connection.exec_driver_sql("PRAGMA user_version=2")
+        with self.engine.begin() as connection:
+            for name, table, columns in (
+                ("ix_reference_source", "references", "source_kind, source_id"),
+                ("ix_gallery_source", "gallery_images", "source_kind, source_id"),
+                ("ix_inspiration_target", "inspirations", "target_kind, target_id"),
+                ("ix_event_work_time", "events", "work_id, year, month, id"),
+                ("ix_chapter_volume_order", "chapters", "volume_id, sort_order, id"),
+            ):
+                connection.exec_driver_sql(f'CREATE INDEX IF NOT EXISTS "{name}" ON "{table}" ({columns})')
         with self.engine.connect() as connection:
             connection.exec_driver_sql("PRAGMA journal_mode=WAL")
+        from app.services.integrity import validate_schema
+        with closing(sqlite3.connect(self.database_file.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+            validate_schema(connection)
         return self
 
     def close(self):

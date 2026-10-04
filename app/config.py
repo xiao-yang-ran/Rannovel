@@ -30,11 +30,11 @@ def inspect_legacy_library(project_root: Path) -> dict[str, int]:
     """Read only: never move or modify the old program-local database."""
     legacy = Path(project_root) / "data" / "rannovel.db"
     if not legacy.is_file(): return {}
-    connection = sqlite3.connect(f"file:{legacy.as_posix()}?mode=ro", uri=True)
+    connection = sqlite3.connect(legacy.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         ignored = {"tags", "sqlite_sequence"}
-        return {name: connection.execute(f'SELECT count(*) FROM "{name}"').fetchone()[0]
+        return {name: connection.execute('SELECT count(*) FROM "' + name.replace('"', '""') + '"' ).fetchone()[0]
                 for name in names - ignored}
     finally:
         connection.close()

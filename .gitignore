@@ -3,7 +3,12 @@ __pycache__/
 .pytest_cache/
 .idea/
 .vscode/
-data/*.db
-data/*.db-*
-backups/*.zip
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+data/
+assets/
+backups/
+*.zip.tmp
 RanNovel_*_final.zip
