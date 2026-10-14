@@ -151,7 +151,7 @@ QGroupBox::title {
 QGroupBox QLabel {
     background: transparent;
 }
-QLineEdit, QPlainTextEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {
+QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QComboBox {
     background: #FFFEFB;
     border: 1px solid #DFD4C4;
     border-radius: 8px;
@@ -171,7 +171,7 @@ QPlainTextEdit#inspirationComposer {
 QLineEdit:hover, QPlainTextEdit:hover, QTextEdit:hover, QSpinBox:hover, QComboBox:hover {
     border-color: #CDB89D;
 }
-QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus {
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QComboBox:focus {
     border: 1px solid #64879A;
     background: #FFFFFF;
 }

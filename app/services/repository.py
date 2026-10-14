@@ -68,16 +68,6 @@ class LibraryRepository:
             s.add(item); s.flush()
             return item.id
 
-    def rename_work(self, work_id, title):
-        if not title.strip():
-            raise ValueError("作品名称不能为空。")
-        with self.database.session_factory.begin() as s:
-            item = s.get(Work, work_id)
-            if item is None:
-                raise LookupError("作品不存在。")
-            item.title = title.strip()
-
-
     def archive_work(self, work_id, archived=True):
         with self.database.session_factory.begin() as s:
             item = s.get(Work, work_id)
@@ -576,9 +566,3 @@ class LibraryRepository:
             if link:
                 s.delete(link)
         return self.collect_unused_assets()
-
-
-    def asset_path(self, asset_id):
-        with self.database.session_factory() as s:
-            asset = s.get(Asset, asset_id)
-            return self.paths.assets_dir / asset.filename if asset else None

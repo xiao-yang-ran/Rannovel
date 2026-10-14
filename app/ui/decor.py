@@ -5,66 +5,12 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
-    QIcon,
     QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
-    QPixmap,
 )
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
-
-
-SECTION_COPY = (
-    ("灵感摘录", "先收下句子，再让它找到自己的故事。"),
-    ("故事年表", "把时间写清楚，命运才有回响。"),
-    ("人物群像", "每个人都有不肯说出口的来处。"),
-    ("世界法则", "为想象设定边界，也给奇迹留下入口。"),
-    ("山川地理", "让每一处地方都能容纳一个故事。"),
-    ("章节脉络", "从一页纸开始，铺开完整的长篇。"),
-)
-
-
-def navigation_icon(kind: int) -> QIcon:
-    pixmap = QPixmap(32, 32)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QPen(QColor("#E3D0A9"), 1.7))
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    if kind == 0:  # a folded note
-        painter.drawRoundedRect(QRectF(6, 5, 20, 22), 3, 3)
-        painter.drawLine(10, 12, 22, 12)
-        painter.drawLine(10, 17, 20, 17)
-        painter.drawLine(10, 22, 17, 22)
-    elif kind == 1:  # timeline
-        painter.drawLine(16, 5, 16, 27)
-        for y in (9, 16, 23):
-            painter.drawEllipse(QPointF(16, y), 2.5, 2.5)
-            painter.drawLine(20, y, 25, y)
-    elif kind == 2:  # portrait
-        painter.drawEllipse(QRectF(12, 6, 9, 9))
-        painter.drawArc(QRectF(7, 17, 20, 14), 20 * 16, 140 * 16)
-    elif kind == 3:  # universe / compass
-        painter.drawEllipse(QRectF(6, 6, 20, 20))
-        painter.drawLine(16, 4, 16, 28)
-        painter.drawLine(4, 16, 28, 16)
-        painter.drawEllipse(QPointF(16, 16), 2, 2)
-    elif kind == 4:  # location pin
-        path = QPainterPath()
-        path.moveTo(16, 28)
-        path.cubicTo(8, 17, 8, 8, 16, 6)
-        path.cubicTo(24, 8, 24, 17, 16, 28)
-        painter.drawPath(path)
-        painter.drawEllipse(QPointF(16, 14), 3, 3)
-    else:  # book outline
-        painter.drawLine(16, 7, 16, 26)
-        painter.drawArc(QRectF(5, 6, 12, 19), 90 * 16, 180 * 16)
-        painter.drawArc(QRectF(15, 6, 12, 19), 270 * 16, 180 * 16)
-        painter.drawLine(8, 26, 16, 28)
-        painter.drawLine(16, 28, 24, 26)
-    painter.end()
-    return QIcon(pixmap)
 
 
 class HeroPanel(QWidget):
@@ -82,7 +28,7 @@ class HeroPanel(QWidget):
         self.eyebrow.setObjectName("heroEyebrow")
         self.title = QLabel("灵感摘录")
         self.title.setObjectName("heroTitle")
-        self.subline = QLabel(SECTION_COPY[0][1])
+        self.subline = QLabel("先收下句子，再让它找到自己的故事。")
         self.subline.setObjectName("heroSubline")
         text_column.addWidget(self.eyebrow)
         text_column.addWidget(self.title)
@@ -93,12 +39,6 @@ class HeroPanel(QWidget):
         self.badge.setObjectName("heroBadge")
         self.badge.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self.badge)
-
-    def set_section(self, index: int) -> None:
-        if 0 <= index < len(SECTION_COPY):
-            title, subline = SECTION_COPY[index]
-            self.title.setText(title)
-            self.subline.setText(subline)
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
